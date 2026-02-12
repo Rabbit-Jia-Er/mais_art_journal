@@ -7,7 +7,7 @@ from typing import Tuple, Optional
 from src.common.logger import get_logger
 from src.plugin_system.apis import llm_api
 
-logger = get_logger("prompt_optimizer")
+logger = get_logger("mais_art.optimizer")
 
 # 提示词优化系统提示词
 OPTIMIZER_SYSTEM_PROMPT = """You are a professional AI art prompt engineer. Your task is to convert user descriptions into high-quality English prompts for image generation models (Stable Diffusion, DALL-E, etc.).
@@ -32,6 +32,34 @@ Input: 赛博朋克城市
 Output: cyberpunk cityscape, neon lights, futuristic buildings, flying cars, rain, reflective wet streets, holographic advertisements, purple and blue color scheme, atmospheric, cinematic lighting, masterpiece, best quality, high resolution
 
 Now convert the following description to an English prompt:"""
+
+# 自拍场景专用提示词：只生成场景/环境/光线/氛围，不生成角色外观
+SELFIE_SCENE_SYSTEM_PROMPT = """You are a scene description assistant for selfie image generation. The character's appearance is already defined separately. Your task is to convert the user's description into English tags describing ONLY the scene, environment, lighting, mood, and atmosphere.
+
+## Rules:
+1. Output ONLY English tags, no explanations
+2. Use comma-separated tags/phrases
+3. NEVER include character appearance (hair color, eye color, clothing, body type, etc.)
+4. NEVER include character names or franchise references
+5. Focus on: background, environment, lighting, weather, mood, atmosphere, time of day
+6. Keep it concise (20-60 words)
+7. If the description is just "selfie" or similar with no scene info, output a simple generic scene
+
+## Examples:
+
+Input: 在海边自拍
+Output: beach background, ocean waves, golden sunset, warm sunlight, sand, gentle breeze, summer atmosphere
+
+Input: 图书馆学习
+Output: library interior, bookshelves, warm ambient lighting, quiet atmosphere, wooden desk, soft focus background
+
+Input: 来张自拍
+Output: casual indoor setting, soft natural lighting, clean background
+
+Input: 下雨天在咖啡店
+Output: coffee shop interior, rainy window, warm cozy atmosphere, soft indoor lighting, rain drops on glass, bokeh background
+
+Now convert the following description to English scene tags:"""
 
 
 class PromptOptimizer:
@@ -60,11 +88,12 @@ class PromptOptimizer:
                 return None
         return self._model_config
 
-    async def optimize(self, user_description: str) -> Tuple[bool, str]:
+    async def optimize(self, user_description: str, scene_only: bool = False) -> Tuple[bool, str]:
         """优化用户描述为专业绘画提示词
 
         Args:
             user_description: 用户原始描述（中文或英文）
+            scene_only: 仅生成场景/环境描述（自拍模式用，不包含角色外观）
 
         Returns:
             Tuple[bool, str]: (是否成功, 优化后的提示词或错误信息)
@@ -79,10 +108,14 @@ class PromptOptimizer:
             return True, user_description
 
         try:
-            # 构建完整 prompt
-            full_prompt = f"{OPTIMIZER_SYSTEM_PROMPT}\n\nInput: {user_description.strip()}\nOutput:"
+            # 根据模式选择系统提示词
+            system_prompt = SELFIE_SCENE_SYSTEM_PROMPT if scene_only else OPTIMIZER_SYSTEM_PROMPT
 
-            logger.info(f"{self.log_prefix} 开始优化提示词: {user_description[:50]}...")
+            # 构建完整 prompt
+            full_prompt = f"{system_prompt}\n\nInput: {user_description.strip()}\nOutput:"
+
+            mode_label = "场景提示词" if scene_only else "提示词"
+            logger.info(f"{self.log_prefix} 开始优化{mode_label}: {user_description[:50]}...")
 
             # 调用 LLM（不传递 temperature 和 max_tokens，使用模型默认值）
             success, response, reasoning, model_name = await llm_api.generate_with_model(
@@ -140,15 +173,16 @@ def get_optimizer(log_prefix: str = "[PromptOptimizer]") -> PromptOptimizer:
     return _optimizer_instance
 
 
-async def optimize_prompt(user_description: str, log_prefix: str = "[PromptOptimizer]") -> Tuple[bool, str]:
+async def optimize_prompt(user_description: str, log_prefix: str = "[PromptOptimizer]", scene_only: bool = False) -> Tuple[bool, str]:
     """便捷函数：优化提示词
 
     Args:
         user_description: 用户原始描述
         log_prefix: 日志前缀
+        scene_only: 仅生成场景/环境描述（自拍模式用）
 
     Returns:
         Tuple[bool, str]: (是否成功, 优化后的提示词)
     """
     optimizer = get_optimizer(log_prefix)
-    return await optimizer.optimize(user_description)
+    return await optimizer.optimize(user_description, scene_only=scene_only)

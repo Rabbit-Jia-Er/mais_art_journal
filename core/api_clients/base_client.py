@@ -4,7 +4,7 @@ import base64
 from typing import Dict, Any, Tuple, Optional
 from src.common.logger import get_logger
 
-logger = get_logger("pic_action")
+logger = get_logger("mais_art.api")
 
 
 class BaseApiClient:

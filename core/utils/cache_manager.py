@@ -3,7 +3,7 @@ from threading import Lock
 
 from src.common.logger import get_logger
 
-logger = get_logger("pic_action")
+logger = get_logger("mais_art.cache")
 
 class CacheManager:
     """缓存管理器"""

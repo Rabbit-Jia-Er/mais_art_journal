@@ -146,19 +146,19 @@ class OpenAIClient(BaseApiClient):
         req = urllib.request.Request(endpoint, data=data, headers=headers, method="POST")
 
         try:
-            # 如果启用了代理，设置代理处理器
+            # 构建 opener（局部使用，不污染全局）
             if proxy_config:
                 proxy_handler = urllib.request.ProxyHandler({
                     'http': proxy_config['http'],
                     'https': proxy_config['https']
                 })
                 opener = urllib.request.build_opener(proxy_handler)
-                urllib.request.install_opener(opener)
                 timeout = proxy_config.get('timeout', 600)
             else:
+                opener = urllib.request.build_opener()
                 timeout = 600
 
-            with urllib.request.urlopen(req, timeout=timeout) as response:
+            with opener.open(req, timeout=timeout) as response:
                 response_status = response.status
                 response_body_bytes = response.read()
                 response_body_str = response_body_bytes.decode("utf-8")
