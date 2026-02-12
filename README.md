@@ -318,15 +318,6 @@ watercolor = "水彩"
 用户：/dr set model2
 麦麦：✅ 图生图命令模型已成功切换！
 ```
-## 魔搭链接及教程
-
-==具体流程步骤如下：==
-
-1. 注册一个魔搭账号。
-2. 然后你需要根据魔搭[官网阿里云绑定教程](https://modelscope.cn/docs/accounts/aliyun-binding-and-authorization)完成阿里云认证。
-3. 接着到你的魔搭主页申请一个 API key，参考[API推理介绍](https://modelscope.cn/docs/model-service/API-Inference/intro)。
-4. 现在你已经拥有了一个 key 可以直接去[模型库](https://modelscope.cn/models)挑选你想要使用的生图模型了，在每个模型的详细里都会有一段教程告诉你怎么使用，我们只需要取可以使用 API 推理的模型的模型名称就好了。
-5. 在该插件的配置文件中填入你获取的 key ，选择魔搭对应的请求地址，然后填入对应的模型名称即可。剩下的相关配置根据配置文件中的注释填入。
 
 ## 🔧 依赖说明
 
@@ -355,8 +346,8 @@ watercolor = "水彩"
 
 ## 贡献和反馈
 
-*制作者水平有限，任何漏洞、疑问或建议,欢迎提交 Issue 和 Pull Request！
-或联系QQ：1021143806,3082618311*
+- 制作者水平有限，任何漏洞、疑问或建议,欢迎提交 Issue 和 Pull Request！
+- 或联系QQ：1021143806,3082618311。
 
 ---
 
