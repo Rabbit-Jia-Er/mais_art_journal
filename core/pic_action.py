@@ -9,15 +9,16 @@ from src.plugin_system.base.component_types import ActionActivationType, ChatMod
 from src.common.logger import get_logger
 
 from .api_clients import get_client_class
-from .image_utils import ImageProcessor
-from .cache_manager import CacheManager
-from .size_utils import validate_image_size, get_image_size
-from .runtime_state import runtime_state
-from .prompt_optimizer import optimize_prompt
+from .utils import (
+    ImageProcessor, CacheManager, validate_image_size, get_image_size,
+    runtime_state, BASE64_IMAGE_PREFIXES, ANTI_DUAL_HANDS_PROMPT,
+    get_model_config, merge_negative_prompt, inject_llm_original_size,
+    resolve_image_data, schedule_auto_recall, optimize_prompt,
+)
 
-logger = get_logger("pic_action")
+logger = get_logger("mais_art")
 
-class Custom_Pic_Action(BaseAction):
+class MaisArtAction(BaseAction):
     """统一的图片生成动作，智能检测文生图或图生图"""
 
     # 激活设置
@@ -51,31 +52,31 @@ class Custom_Pic_Action(BaseAction):
     ALWAYS_prompt = """
 判定是否需要使用图片生成动作的条件：
 
+**核心原则：只有在用户明确对你提出画图请求时才使用。在群聊中，必须是用户@你或点名叫你来画图。**
+
 **文生图场景：**
-1. 用户明确@你的名字并要求画图、生成图片或创作图像
-2. 用户描述了想要看到的画面或场景
-3. 对话中提到需要视觉化展示某些概念
-4. 用户想要创意图片或艺术作品
-5. 你想要通过画图来制作表情包表达情绪
+1. 用户明确@你的名字或叫你的名字，要求画图、生成图片或创作图像
+2. 用户在私聊中直接要求你画某个内容
 
 **图生图场景：**
-1. 用户发送了图片并@你的名字要求基于该图片进行修改或重新生成
-2. 用户明确@你的名字要求并提到"图生图"、"修改图片"、"基于这张图"等关键词
-3. 用户想要改变现有图片的风格、颜色、内容等
-4. 用户要求在现有图片基础上添加或删除元素
+1. 用户发送了图片并@你的名字，要求基于该图片进行修改或重新生成
+2. 用户明确@你并提到"图生图"、"修改图片"、"基于这张图"等关键词
 
 **自拍场景：**
-1. 用户明确要求你进行自拍、拍照等
-2. 用户提到"自拍"、"selfie"、"照镜子"、"对镜自拍"等关键词
-3. 用户想要看到你的照片或形象
+1. 用户明确@你或叫你的名字，要求你自拍、拍照
+2. 用户在私聊中要求你自拍
 
 **绝对不要使用的情况：**
-1. 纯文字聊天和问答
-2. 只是提到"图片"、"画"等词但不是要求生成
-3. 谈论已存在的图片或照片（仅讨论不修改）
-4. 技术讨论中提到绘图概念但无生成需求
-5. 用户明确表示不需要图片时
-6. 刚刚成功生成过图片，避免频繁请求
+1. 群聊中用户没有@你或叫你的名字，即使消息内容涉及画图
+2. 其他机器人的命令（如/nai、/sd、/mj等），这些是发给其他机器人的，不是对你的请求
+3. 用户只是在描述场景或事物，并没有要求你画图
+4. 纯文字聊天和问答
+5. 只是提到"图片"、"画"等词但不是在要求你生成
+6. 谈论已存在的图片或照片（仅讨论不修改）
+7. 技术讨论中提到绘图概念但无生成需求
+8. 用户明确表示不需要图片时
+9. 刚刚成功生成过图片，避免频繁请求
+10. 你主动想画图但用户没有要求——不要自作主张
 """
 
     keyword_case_sensitive = False
@@ -93,7 +94,8 @@ class Custom_Pic_Action(BaseAction):
 
     # 动作使用场景
     action_require = [
-        "当用户要求生成或修改图片时使用，不要频率太高",
+        "当用户明确对你提出生成或修改图片请求时使用，不要频率太高",
+        "群聊中必须是用户@你或叫你名字要求画图才使用，不要响应发给其他机器人的命令（如/nai、/sd等）",
         "自动检测是否有输入图片来决定文生图或图生图模式",
         "重点：不要连续发，如果你在前10句内已经发送过[图片]或者[表情包]或记录出现过类似描述的[图片]，就不要选择此动作",
         "支持指定模型：用户可以通过'用模型1画'、'model2生成'等方式指定特定模型"
@@ -167,16 +169,18 @@ class Custom_Pic_Action(BaseAction):
             description = description[:1000]
             logger.info(f"{self.log_prefix} 图片描述过长，已截断至1000字符")
 
-        # 提示词优化
+        # 提示词优化（自拍模式仅优化场景/环境，不生成角色外观）
         optimizer_enabled = self.get_config("prompt_optimizer.enabled", True)
         if optimizer_enabled:
-            logger.info(f"{self.log_prefix} 开始优化提示词: {description[:50]}...")
-            success, optimized_prompt = await optimize_prompt(description, self.log_prefix)
+            scene_only = bool(selfie_mode)
+            mode_label = "场景提示词" if scene_only else "提示词"
+            logger.info(f"{self.log_prefix} 开始优化{mode_label}: {description[:50]}...")
+            success, optimized_prompt = await optimize_prompt(description, self.log_prefix, scene_only=scene_only)
             if success:
-                logger.info(f"{self.log_prefix} 提示词优化完成: {optimized_prompt[:80]}...")
+                logger.info(f"{self.log_prefix} {mode_label}优化完成: {optimized_prompt[:80]}...")
                 description = optimized_prompt
             else:
-                logger.warning(f"{self.log_prefix} 提示词优化失败，使用原始描述: {description[:50]}...")
+                logger.warning(f"{self.log_prefix} {mode_label}优化失败，使用原始描述: {description[:50]}...")
 
         # 验证strength参数
         try:
@@ -187,6 +191,7 @@ class Custom_Pic_Action(BaseAction):
             strength = 0.7
 
         # 处理自拍模式
+        selfie_negative_prompt = None
         if selfie_mode:
             # 检查自拍功能是否启用
             selfie_enabled = self.get_config("selfie.enabled", True)
@@ -195,7 +200,7 @@ class Custom_Pic_Action(BaseAction):
                 return False, "自拍功能未启用"
 
             logger.info(f"{self.log_prefix} 启用自拍模式，风格: {selfie_style}")
-            description = self._process_selfie_prompt(description, selfie_style, free_hand_action, model_id)
+            description, selfie_negative_prompt = self._process_selfie_prompt(description, selfie_style, free_hand_action, model_id)
             logger.info(f"{self.log_prefix} 自拍模式处理后的提示词: {description[:100]}...")
 
             # 检查是否配置了参考图片
@@ -205,10 +210,13 @@ class Custom_Pic_Action(BaseAction):
                 model_config = self._get_model_config(model_id)
                 if model_config and model_config.get("support_img2img", True):
                     logger.info(f"{self.log_prefix} 使用自拍参考图片进行图生图")
-                    return await self._execute_unified_generation(description, model_id, size, strength or 0.6, reference_image)
+                    return await self._execute_unified_generation(description, model_id, size, strength or 0.6, reference_image, extra_negative_prompt=selfie_negative_prompt)
                 else:
                     logger.warning(f"{self.log_prefix} 模型 {model_id} 不支持图生图，自拍回退为文生图模式")
-            # 无参考图或模型不支持，继续使用文生图
+            # 无参考图或模型不支持，继续使用文生图（带负面提示词）
+
+        # 收集自拍模式的额外负面提示词（如果启用了自拍模式）
+        extra_neg = selfie_negative_prompt if selfie_mode else None
 
         # **智能检测：判断是文生图还是图生图**
         input_image_base64 = await self.image_processor.get_recent_image()
@@ -220,16 +228,20 @@ class Custom_Pic_Action(BaseAction):
             if model_config and not model_config.get("support_img2img", True):
                 logger.warning(f"{self.log_prefix} 模型 {model_id} 不支持图生图，转为文生图模式")
                 await self.send_text(f"当前模型 {model_id} 不支持图生图功能，将为您生成新图片")
-                return await self._execute_unified_generation(description, model_id, size, None, None)
+                return await self._execute_unified_generation(description, model_id, size, None, None, extra_negative_prompt=extra_neg)
 
             logger.info(f"{self.log_prefix} 检测到输入图片，使用图生图模式")
-            return await self._execute_unified_generation(description, model_id, size, strength, input_image_base64)
+            return await self._execute_unified_generation(description, model_id, size, strength, input_image_base64, extra_negative_prompt=extra_neg)
         else:
             logger.info(f"{self.log_prefix} 未检测到输入图片，使用文生图模式")
-            return await self._execute_unified_generation(description, model_id, size, None, None)
+            return await self._execute_unified_generation(description, model_id, size, None, None, extra_negative_prompt=extra_neg)
 
-    async def _execute_unified_generation(self, description: str, model_id: str, size: str, strength: float = None, input_image_base64: str = None) -> Tuple[bool, Optional[str]]:
-        """统一的图片生成执行方法"""
+    async def _execute_unified_generation(self, description: str, model_id: str, size: str, strength: float = None, input_image_base64: str = None, extra_negative_prompt: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+        """统一的图片生成执行方法
+
+        Args:
+            extra_negative_prompt: 额外负面提示词（如自拍模式的 anti-dual-hands），会合并到模型配置的 negative_prompt_add
+        """
 
         # 获取模型配置
         model_config = self._get_model_config(model_id)
@@ -258,6 +270,11 @@ class Custom_Pic_Action(BaseAction):
         # 获取模型配置参数
         model_name = model_config.get("model", "default-model")
         api_format = model_config.get("format", "openai")
+
+        # 合并额外的负面提示词（如自拍 anti-dual-hands）
+        if extra_negative_prompt:
+            model_config = merge_negative_prompt(model_config, extra_negative_prompt)
+            logger.info(f"{self.log_prefix} 合并额外负面提示词: {extra_negative_prompt[:80]}...")
 
         # 使用统一的尺寸处理逻辑
         image_size, llm_original_size = get_image_size(model_config, size, self.log_prefix)
@@ -292,9 +309,7 @@ class Custom_Pic_Action(BaseAction):
 
         try:
             # 对于 Gemini/Zai 格式，将原始 LLM 尺寸添加到 model_config 中
-            if api_format in ("gemini", "zai") and llm_original_size:
-                model_config = dict(model_config)  # 创建副本避免修改原配置
-                model_config["_llm_original_size"] = llm_original_size
+            model_config = inject_llm_original_size(model_config, llm_original_size)
 
             # 获取重试次数配置
             max_retries = self.get_config("components.max_retries", 2)
@@ -319,43 +334,24 @@ class Custom_Pic_Action(BaseAction):
             final_image_data = self.image_processor.process_api_response(result)
 
             if final_image_data:
-                if final_image_data.startswith(("iVBORw", "/9j/", "UklGR", "R0lGOD")):  # Base64
-                    send_success = await self.send_image(final_image_data)
+                resolved_ok, resolved_data = await resolve_image_data(
+                    final_image_data, self._download_and_encode_base64, self.log_prefix
+                )
+                if resolved_ok:
+                    send_success = await self.send_image(resolved_data)
                     if send_success:
                         mode_text = "图生图" if is_img2img else "文生图"
                         if enable_debug:
                             await self.send_text(f"{mode_text}完成！")
-                        # 缓存成功的结果
-                        self.cache_manager.cache_result(description, model_name, image_size, strength, is_img2img, final_image_data)
-                        # 安排自动撤回（如果该模型启用）
+                        self.cache_manager.cache_result(description, model_name, image_size, strength, is_img2img, resolved_data)
                         await self._schedule_auto_recall_for_recent_message(model_config)
                         return True, f"{mode_text}已成功生成并发送"
                     else:
                         await self.send_text("图片已处理完成，但发送失败了")
                         return False, "图片发送失败"
-                else:  # URL
-                    try:
-                        encode_success, encode_result = await asyncio.to_thread(
-                            self.image_processor.download_and_encode_base64, final_image_data
-                        )
-                        if encode_success:
-                            send_success = await self.send_image(encode_result)
-                            if send_success:
-                                mode_text = "图生图" if is_img2img else "文生图"
-                                if enable_debug:
-                                    await self.send_text(f"{mode_text}完成！")
-                                # 缓存成功结果
-                                self.cache_manager.cache_result(description, model_name, image_size, strength, is_img2img, encode_result)
-                                # 安排自动撤回（如果该模型启用）
-                                await self._schedule_auto_recall_for_recent_message(model_config)
-                                return True, f"{mode_text}已完成"
-                        else:
-                            await self.send_text(f"获取到图片URL，但在处理图片时失败了：{encode_result}")
-                            return False, f"图片处理失败: {encode_result}"
-                    except Exception as e:
-                        logger.error(f"{self.log_prefix} 图片下载编码失败: {e!r}")
-                        await self.send_text("图片生成完成但下载时出错")
-                        return False, "图片下载失败"
+                else:
+                    await self.send_text(f"图片处理失败：{resolved_data}")
+                    return False, f"图片处理失败: {resolved_data}"
             else:
                 await self.send_text("图片生成API返回了无法处理的数据格式")
                 return False, "API返回数据格式错误"
@@ -366,28 +362,23 @@ class Custom_Pic_Action(BaseAction):
 
     def _get_model_config(self, model_id: str = None) -> Dict[str, Any]:
         """获取指定模型的配置，支持热重载"""
-        # 如果没有指定模型ID，使用默认模型
         if not model_id:
             model_id = self.get_config("generation.default_model", "model1")
+        default_model_id = self.get_config("generation.default_model", "model1")
+        return get_model_config(self.get_config, model_id, default_model_id, self.log_prefix) or {}
 
-        # 构建模型配置的路径
-        model_config_path = f"models.{model_id}"
-        model_config = self.get_config(model_config_path)
-
-        if not model_config:
-            logger.warning(f"{self.log_prefix} 模型 {model_id} 配置不存在，尝试使用默认模型")
-            # 尝试获取默认模型
-            default_model_id = self.get_config("generation.default_model", "model1")
-            if default_model_id != model_id:
-                model_config = self.get_config(f"models.{default_model_id}")
-
-        return model_config or {}
+    def _download_and_encode_base64(self, image_url: str) -> Tuple[bool, str]:
+        """下载图片并转换为base64（带代理支持）"""
+        proxy_url = None
+        if self.get_config("proxy.enabled", False):
+            proxy_url = self.get_config("proxy.url", "http://127.0.0.1:7890")
+        return self.image_processor.download_and_encode_base64(image_url, proxy_url=proxy_url)
 
     def _validate_image_size(self, size: str) -> bool:
         """验证图片尺寸格式是否正确（委托给size_utils）"""
         return validate_image_size(size)
 
-    def _process_selfie_prompt(self, description: str, selfie_style: str, free_hand_action: str, model_id: str) -> str:
+    def _process_selfie_prompt(self, description: str, selfie_style: str, free_hand_action: str, model_id: str) -> Tuple[str, str]:
         """处理自拍模式的提示词生成
 
         Args:
@@ -397,7 +388,7 @@ class Custom_Pic_Action(BaseAction):
             model_id: 模型ID（保留参数，用于后续扩展）
 
         Returns:
-            处理后的完整提示词
+            (prompt, negative_prompt) 元组：处理后的正面提示词和负面提示词
         """
         import random
 
@@ -513,8 +504,23 @@ class Custom_Pic_Action(BaseAction):
 
         final_prompt = ", ".join(unique_keywords)
 
+        # 构建自拍负面提示词
+        # anti-dual-hands：防止生成双手拿手机等不自然姿态
+        anti_dual_hands = ANTI_DUAL_HANDS_PROMPT
+
+        # 读取配置中的基础负面提示词
+        base_negative = self.get_config("selfie.negative_prompt", "").strip()
+
+        # 合并负面提示词
+        negative_parts = []
+        if base_negative:
+            negative_parts.append(base_negative)
+        negative_parts.append(anti_dual_hands)
+        selfie_negative_prompt = ", ".join(negative_parts)
+
         logger.info(f"{self.log_prefix} 自拍模式最终提示词: {final_prompt[:200]}...")
-        return final_prompt
+        logger.info(f"{self.log_prefix} 自拍模式负面提示词: {selfie_negative_prompt[:150]}...")
+        return final_prompt, selfie_negative_prompt
 
     def _get_selfie_reference_image(self) -> Optional[str]:
         """获取自拍参考图片的base64编码
@@ -546,20 +552,9 @@ class Custom_Pic_Action(BaseAction):
             return None
 
     async def _schedule_auto_recall_for_recent_message(self, model_config: Dict[str, Any] = None):
-        """安排最近发送消息的自动撤回
-
-        通过查询数据库获取最近发送的消息ID，然后安排撤回任务
-
-        Args:
-            model_config: 当前使用的模型配置，用于检查撤回延时设置
-        """
-        # 检查全局开关
+        """安排最近发送消息的自动撤回"""
         global_enabled = self.get_config("auto_recall.enabled", False)
-        if not global_enabled:
-            return
-
-        # 检查模型的撤回延时，大于0才启用
-        if not model_config:
+        if not global_enabled or not model_config:
             return
 
         delay_seconds = model_config.get("auto_recall_delay", 0)
@@ -570,102 +565,105 @@ class Custom_Pic_Action(BaseAction):
         model_id = None
         models_config = self.get_config("models", {})
         for mid, config in models_config.items():
-            # 通过模型名称匹配，避免字典比较问题
             if config.get("model") == model_config.get("model"):
                 model_id = mid
                 break
 
-        # 检查运行时撤回状态
         if model_id and not runtime_state.is_recall_enabled(self.chat_id, model_id, global_enabled):
             logger.info(f"{self.log_prefix} 模型 {model_id} 撤回已在当前聊天流禁用")
             return
 
-        # 创建异步任务
-        async def recall_task():
-            try:
-                # 等待足够时间让消息存储和 echo 回调完成（平台返回真实消息ID需要时间）
-                await asyncio.sleep(4)
+        await schedule_auto_recall(self.chat_id, delay_seconds, self.log_prefix, self.send_command)
 
-                # 查询最近发送的消息获取消息ID
-                import time as time_module
-                from src.plugin_system.apis import message_api
-                from src.config.config import global_config
+    async def _generate_image_only(
+        self,
+        description: str,
+        model_id: str = None,
+        size: str = "",
+        strength: float = None,
+        input_image_base64: str = None,
+        extra_negative_prompt: Optional[str] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """仅生成图片，不发送消息、不撤回、不缓存
 
-                current_time = time_module.time()
-                # 查询最近10秒内本聊天中Bot发送的消息
-                messages = message_api.get_messages_by_time_in_chat(
-                    chat_id=self.chat_id,
-                    start_time=current_time - 10,
-                    end_time=current_time + 1,
-                    limit=5,
-                    limit_mode="latest"
-                )
+        与 _execute_unified_generation() 共享核心逻辑，但适用于自动自拍等
+        需要拿到图片数据而不直接发送的场景。
 
-                # 找到Bot发送的图片消息
-                bot_id = str(global_config.bot.qq_account)
-                target_message_id = None
+        Args:
+            description: 图片描述/提示词
+            model_id: 模型ID，默认使用 generation.default_model
+            size: 图片尺寸，留空使用模型默认值
+            strength: 图生图强度
+            input_image_base64: 输入图片的 base64（图生图用）
+            extra_negative_prompt: 额外负面提示词
 
-                for msg in messages:
-                    if str(msg.user_info.user_id) == bot_id:
-                        # 找到Bot发送的最新消息
-                        mid = str(msg.message_id)
-                        # 只使用纯数字的消息ID（QQ平台真实ID），跳过 send_api_xxx 格式的内部ID
-                        if mid.isdigit():
-                            target_message_id = mid
-                            break
-                        else:
-                            logger.debug(f"{self.log_prefix} 跳过非平台消息ID: {mid}")
+        Returns:
+            (success, image_data): success 为 True 时 image_data 是 base64 或 URL 字符串
+        """
+        if not model_id:
+            model_id = self.get_config("generation.default_model", "model1")
 
-                if not target_message_id:
-                    logger.warning(f"{self.log_prefix} 未找到有效的平台消息ID（需要纯数字格式）")
-                    return
+        # 获取模型配置
+        model_config = self._get_model_config(model_id)
+        if not model_config:
+            logger.error(f"{self.log_prefix} [image_only] 模型配置获取失败: {model_id}")
+            return False, f"模型 '{model_id}' 不存在或配置无效"
 
-                logger.info(f"{self.log_prefix} 安排消息自动撤回，延时: {delay_seconds}秒，消息ID: {target_message_id}")
+        # 配置验证
+        http_base_url = model_config.get("base_url")
+        http_api_key = model_config.get("api_key")
+        if not (http_base_url and http_api_key):
+            return False, "HTTP配置不完整"
+        if "YOUR_API_KEY_HERE" in http_api_key or "xxxxxxxxxxxxxx" in http_api_key:
+            return False, "API密钥未配置"
 
-                # 等待指定时间后撤回
-                await asyncio.sleep(delay_seconds)
+        api_format = model_config.get("format", "openai")
 
-                # 尝试多个撤回命令名（参考 recall_manager_plugin）
-                DELETE_COMMAND_CANDIDATES = ["DELETE_MSG", "delete_msg", "RECALL_MSG", "recall_msg"]
-                recall_success = False
+        # 合并额外负面提示词
+        if extra_negative_prompt:
+            model_config = merge_negative_prompt(model_config, extra_negative_prompt)
 
-                for cmd in DELETE_COMMAND_CANDIDATES:
-                    try:
-                        result = await self.send_command(
-                            command_name=cmd,
-                            args={"message_id": str(target_message_id)},
-                            storage_message=False
-                        )
+        # 处理尺寸
+        image_size, llm_original_size = get_image_size(model_config, size, self.log_prefix)
+        if not self._validate_image_size(image_size):
+            image_size = model_config.get("default_size", "1024x1024")
 
-                        # 检查返回结果
-                        if isinstance(result, bool) and result:
-                            recall_success = True
-                            logger.info(f"{self.log_prefix} 消息自动撤回成功，命令: {cmd}，消息ID: {target_message_id}")
-                            break
-                        elif isinstance(result, dict):
-                            status = str(result.get("status", "")).lower()
-                            if status in ("ok", "success") or result.get("retcode") == 0 or result.get("code") == 0:
-                                recall_success = True
-                                logger.info(f"{self.log_prefix} 消息自动撤回成功，命令: {cmd}，消息ID: {target_message_id}")
-                                break
-                    except Exception as e:
-                        logger.debug(f"{self.log_prefix} 撤回命令 {cmd} 失败: {e}")
-                        continue
+        # Gemini/Zai 尺寸处理
+        model_config = inject_llm_original_size(model_config, llm_original_size)
 
-                if not recall_success:
-                    logger.warning(f"{self.log_prefix} 消息自动撤回失败，消息ID: {target_message_id}，已尝试所有命令")
+        max_retries = self.get_config("components.max_retries", 2)
 
-            except asyncio.CancelledError:
-                logger.debug(f"{self.log_prefix} 自动撤回任务被取消")
-            except Exception as e:
-                logger.error(f"{self.log_prefix} 自动撤回失败: {e}")
+        try:
+            api_client = self._get_api_client(api_format)
+            success, result = await api_client.generate_image(
+                prompt=description,
+                model_config=model_config,
+                size=image_size,
+                strength=strength,
+                input_image_base64=input_image_base64,
+                max_retries=max_retries,
+            )
+        except Exception as e:
+            logger.error(f"{self.log_prefix} [image_only] 生图异常: {e!r}")
+            return False, f"生图异常: {str(e)[:100]}"
 
-        # 启动后台任务
-        asyncio.create_task(recall_task())
+        if not success:
+            return False, result
+
+        # 处理返回数据
+        final_image_data = self.image_processor.process_api_response(result)
+        if not final_image_data:
+            return False, "API返回数据格式错误"
+
+        # 如果是 URL，下载并转为 base64
+        return await resolve_image_data(
+            final_image_data, self._download_and_encode_base64,
+            f"{self.log_prefix} [image_only]"
+        )
 
     def _extract_description_from_message(self) -> str:
         """从用户消息中提取图片描述
-        
+
         Returns:
             str: 提取的图片描述，如果无法提取则返回空字符串
         """
@@ -699,6 +697,8 @@ class Custom_Pic_Action(BaseAction):
             r'^图[：:]',      # "图："或"图:"
             r'^生成图片[：:]', # "生成图片："或"生成图片:"
             r'^[：:]',        # 单独的冒号
+            r'^用\s*模型\s*\S+\s*',       # "用模型3" / "用 模型 abc"
+            r'^用\s*model\s*\S+\s*',      # "用model2" / "用 model abc"
         ]
         
         cleaned_text = message_text

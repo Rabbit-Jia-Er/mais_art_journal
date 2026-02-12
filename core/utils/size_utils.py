@@ -5,7 +5,7 @@
 from typing import Tuple, Optional, Dict
 from src.common.logger import get_logger
 
-logger = get_logger("pic_action")
+logger = get_logger("mais_art.size")
 
 # LLM 尺寸选择系统提示词
 SIZE_SELECTOR_SYSTEM_PROMPT = """You are an image size selector. Based on the image description, choose the most appropriate size.

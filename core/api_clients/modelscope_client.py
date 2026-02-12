@@ -58,7 +58,7 @@ class ModelscopeClient(BaseApiClient):
                 request_data = {
                     "model": model_name,
                     "prompt": full_prompt,
-                    "image_url": image_data_uri
+                    "image_url": [image_data_uri]
                 }
                 logger.info(f"{self.log_prefix} (魔搭) 使用图生图模式")
             else:
@@ -176,7 +176,7 @@ class ModelscopeClient(BaseApiClient):
                         logger.error(f"{self.log_prefix} (魔搭) 任务失败: {error_msg}")
                         return False, f"任务执行失败: {error_msg}"
 
-                    elif task_status in ["PENDING", "RUNNING"]:
+                    elif task_status in ["PENDING", "RUNNING", "PROCESSING"]:
                         logger.info(f"{self.log_prefix} (魔搭) 任务状态: {task_status}，等待中...")
                         time.sleep(5)
                         continue

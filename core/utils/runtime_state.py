@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional, Set
 from dataclasses import dataclass, field
 from src.common.logger import get_logger
 
-logger = get_logger("runtime_state")
+logger = get_logger("mais_art.state")
 
 
 @dataclass

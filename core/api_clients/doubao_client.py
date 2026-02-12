@@ -60,6 +60,15 @@ class DoubaoClient(BaseApiClient):
                 "watermark": model_config.get("watermark", True)
             }
 
+            # 添加可选参数
+            seed = model_config.get("seed")
+            if seed is not None and seed != -1:
+                request_params["seed"] = seed
+
+            guidance_scale = model_config.get("guidance_scale")
+            if guidance_scale is not None:
+                request_params["guidance_scale"] = guidance_scale
+
             # 如果有输入图片，需要特殊处理
             if input_image_base64:
                 image_data_uri = self._prepare_image_data_uri(input_image_base64)
