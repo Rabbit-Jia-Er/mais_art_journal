@@ -8,7 +8,7 @@ import traceback
 from typing import Dict, Any, Tuple, Optional
 
 from .base_client import BaseApiClient, logger
-from ..size_utils import pixel_size_to_gemini_aspect
+from ..utils import pixel_size_to_gemini_aspect
 
 
 class ZaiClient(BaseApiClient):
@@ -83,18 +83,19 @@ class ZaiClient(BaseApiClient):
         req = urllib.request.Request(endpoint, data=data, headers=headers, method="POST")
 
         try:
+            # 构建 opener（局部使用，不污染全局）
             if proxy_config:
                 proxy_handler = urllib.request.ProxyHandler({
                     'http': proxy_config['http'],
                     'https': proxy_config['https']
                 })
                 opener = urllib.request.build_opener(proxy_handler)
-                urllib.request.install_opener(opener)
                 timeout = proxy_config.get('timeout', 600)
             else:
+                opener = urllib.request.build_opener()
                 timeout = 600
 
-            with urllib.request.urlopen(req, timeout=timeout) as response:
+            with opener.open(req, timeout=timeout) as response:
                 response_status = response.status
                 body_bytes = response.read()
                 body_str = body_bytes.decode("utf-8")

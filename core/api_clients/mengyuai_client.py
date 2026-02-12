@@ -9,20 +9,13 @@ import requests
 from typing import Dict, Any, Tuple
 
 from .base_client import BaseApiClient, logger
-from ..size_utils import parse_pixel_size
+from ..utils import parse_pixel_size
 
 
 class MengyuaiClient(BaseApiClient):
     """梦羽AI API客户端"""
 
     format_name = "mengyuai"
-
-    # 模型索引映射
-    MODEL_INDEX = {
-        "default": 0,
-        "qwen_image_edit": 16,  # Qwen Image Edit版模型，用于图生图
-        "qwen_image_edit_2": 17,  # Qwen Image Edit版(服务器2)
-    }
 
     def _make_request(
         self,
@@ -36,7 +29,7 @@ class MengyuaiClient(BaseApiClient):
         try:
             # API配置
             base_url = model_config.get("base_url", "https://sd.exacg.cc").rstrip('/')
-            api_key = model_config.get("api_key", "")
+            api_key = model_config.get("api_key", "").replace("Bearer ", "")
 
             if not api_key or api_key in ["YOUR_API_KEY", "xxxxxx"]:
                 logger.error(f"{self.log_prefix} (梦羽AI) API密钥未配置")
@@ -67,11 +60,10 @@ class MengyuaiClient(BaseApiClient):
 
             # 如果有输入图片，使用Qwen Image Edit模型
             if input_image_base64:
-                # 使用图生图模型 (默认 model_index=16 是 Qwen Image Edit版)
-                request_data["model_index"] = model_config.get("img2img_model_index", 16)
+                # 使用图生图模型 (默认 model_index=19 是 Qwen Image Edit版)
+                request_data["model_index"] = model_config.get("img2img_model_index", 19)
 
-                # 需要提供图片URL，这里我们需要先将base64转为可访问的URL
-                # 梦羽AI要求image_source是可访问的URL
+                # 梦羽AI要求 image_source 是可公网访问的URL
                 # 检查是否配置了图片上传服务
                 image_upload_url = model_config.get("image_upload_url")
 
@@ -81,13 +73,15 @@ class MengyuaiClient(BaseApiClient):
                     if image_url:
                         request_data["image_source"] = image_url
                     else:
-                        logger.warning(f"{self.log_prefix} (梦羽AI) 图片上传失败，使用文生图模式")
+                        logger.warning(f"{self.log_prefix} (梦羽AI) 图片上传失败，降级为文生图模式")
                         request_data["model_index"] = model_index
                 else:
-                    # 尝试使用data URI（可能不被支持）
+                    logger.warning(
+                        f"{self.log_prefix} (梦羽AI) 未配置 image_upload_url，"
+                        "梦羽AI图生图需要可公网访问的图片URL。将尝试 data URI 但可能不被支持"
+                    )
                     image_data_uri = self._prepare_image_data_uri(input_image_base64)
                     request_data["image_source"] = image_data_uri
-                    logger.info(f"{self.log_prefix} (梦羽AI) 使用图生图模式")
             else:
                 # 文生图模式，添加完整参数
                 request_data["negative_prompt"] = negative_prompt

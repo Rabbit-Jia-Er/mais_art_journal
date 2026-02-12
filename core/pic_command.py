@@ -1,37 +1,23 @@
 import asyncio
 import re
+import time as time_module
 from typing import Tuple, Optional, Dict, Any
 
 from src.plugin_system.base.base_command import BaseCommand
 from src.common.logger import get_logger
 
 from .api_clients import ApiClient
-from .image_utils import ImageProcessor
-from .runtime_state import runtime_state
-from .prompt_optimizer import optimize_prompt
-from .size_utils import get_image_size_async
+from .utils import (
+    ImageProcessor, runtime_state, optimize_prompt, get_image_size_async,
+    get_model_config, inject_llm_original_size, resolve_image_data,
+    schedule_auto_recall,
+)
 
-logger = get_logger("pic_command")
+logger = get_logger("mais_art.command")
 
-class PicGenerationCommand(BaseCommand):
-    """图生图Command组件，支持通过命令进行图生图，可选择特定模型"""
 
-    # 类级别的配置覆盖
-    _config_overrides = {}
-
-    # Command基本信息
-    command_name = "pic_generation_command"
-    command_description = "图生图命令，使用风格化提示词：/dr <风格> 或自然语言：/dr <描述>"
-    # 排除配置管理保留词，避免与 PicConfigCommand 和 PicStyleCommand 重复匹配
-    command_pattern = r"(?:.*，说：\s*)?/dr\s+(?!list\b|models\b|config\b|set\b|reset\b|on\b|off\b|model\b|recall\b|default\b|styles\b|style\b|help\b)(?P<content>.+)$"
-
-    def get_config(self, key: str, default=None):
-        """覆盖get_config方法以支持动态配置"""
-        # 检查是否有配置覆盖
-        if key in self._config_overrides:
-            return self._config_overrides[key]
-        # 否则使用父类的get_config
-        return super().get_config(key, default)
+class PicCommandMixin:
+    """公共方法混入，供 PicGenerationCommand / PicConfigCommand / PicStyleCommand 共用"""
 
     def _get_chat_id(self) -> Optional[str]:
         """获取当前聊天流ID"""
@@ -40,6 +26,56 @@ class PicGenerationCommand(BaseCommand):
             return chat_stream.stream_id if chat_stream else None
         except Exception:
             return None
+
+    def _check_permission(self) -> bool:
+        """检查用户权限"""
+        try:
+            admin_users = self.get_config("components.admin_users", [])
+            user_id = str(self.message.message_info.user_info.user_id) if self.message and self.message.message_info and self.message.message_info.user_info else None
+            return user_id in admin_users
+        except Exception:
+            return False
+
+    def _resolve_style_alias(self, style_name: str) -> str:
+        """解析风格别名，返回实际的风格名"""
+        try:
+            if self.get_config(f"styles.{style_name}"):
+                return style_name
+
+            style_aliases_config = self.get_config("style_aliases", {})
+            if isinstance(style_aliases_config, dict):
+                for english_name, aliases_str in style_aliases_config.items():
+                    if isinstance(aliases_str, str):
+                        aliases = [alias.strip() for alias in aliases_str.split(',')]
+                        if style_name in aliases:
+                            logger.info(f"{self.log_prefix} 风格别名 '{style_name}' 解析为 '{english_name}'")
+                            return english_name
+
+            return style_name
+        except Exception as e:
+            logger.error(f"{self.log_prefix} 解析风格别名失败: {e!r}")
+            return style_name
+
+
+class PicGenerationCommand(PicCommandMixin, BaseCommand):
+    """图生图Command组件，支持通过命令进行图生图，可选择特定模型"""
+
+    # Command基本信息
+    command_name = "pic_generation_command"
+    command_description = "图生图命令，使用风格化提示词：/dr <风格> 或自然语言：/dr <描述>"
+    # 排除配置管理保留词，避免与 PicConfigCommand 和 PicStyleCommand 重复匹配
+    command_pattern = r"(?:.*，说：\s*)?/dr\s+(?!list\b|models\b|config\b|set\b|reset\b|on\b|off\b|model\b|recall\b|default\b|styles\b|style\b|help\b)(?P<content>.+)$"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._image_processor = None
+
+    @property
+    def image_processor(self) -> "ImageProcessor":
+        """复用 ImageProcessor 实例"""
+        if self._image_processor is None:
+            self._image_processor = ImageProcessor(self)
+        return self._image_processor
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行图生图命令，智能判断风格模式或自然语言模式"""
@@ -124,8 +160,7 @@ class PicGenerationCommand(BaseCommand):
             await self.send_text(f"使用风格：{style_name}")
 
         # 获取最近的图片作为输入图片
-        image_processor = ImageProcessor(self)
-        input_image_base64 = await image_processor.get_recent_image()
+        input_image_base64 = await self.image_processor.get_recent_image()
 
         if not input_image_base64:
             await self.send_text("请先发送图片")
@@ -150,10 +185,7 @@ class PicGenerationCommand(BaseCommand):
             max_retries = self.get_config("components.max_retries", 2)
 
             # 对于 Gemini/Zai 格式，将原始 LLM 尺寸添加到 model_config 中
-            api_format = model_config.get("format", "openai")
-            if api_format in ("gemini", "zai") and llm_original_size:
-                model_config = dict(model_config)  # 创建副本避免修改原配置
-                model_config["_llm_original_size"] = llm_original_size
+            model_config = inject_llm_original_size(model_config, llm_original_size)
 
             # 调用API客户端生成图片
             api_client = ApiClient(self)
@@ -167,42 +199,30 @@ class PicGenerationCommand(BaseCommand):
             )
 
             if success:
-                # 处理结果
-                if result.startswith(("iVBORw", "/9j/", "UklGR", "R0lGOD")):  # Base64
-                    send_success = await self.send_image(result)
+                # 统一处理 API 响应（dict/str 等）→ 纯字符串
+                final_image_data = self.image_processor.process_api_response(result)
+                if not final_image_data:
+                    await self.send_text("API返回数据格式错误")
+                    return False, "API返回数据格式错误", True
+
+                # 处理结果：统一解析为 base64
+                resolved_ok, resolved_data = await resolve_image_data(
+                    final_image_data, self._download_and_encode_base64, self.log_prefix
+                )
+                if resolved_ok:
+                    send_timestamp = time_module.time()
+                    send_success = await self.send_image(resolved_data)
                     if send_success:
                         if enable_debug:
                             await self.send_text(f"{style_name} 风格转换完成！")
-                        # 安排自动撤回
-                        await self._schedule_auto_recall_for_recent_message(model_config, model_id)
+                        await self._schedule_auto_recall_for_recent_message(model_config, model_id, send_timestamp)
                         return True, "图生图命令执行成功", True
                     else:
                         await self.send_text("图片发送失败")
                         return False, "图片发送失败", True
-                else:  # URL
-                    try:
-                        # 下载并转换为base64
-                        encode_success, encode_result = await asyncio.to_thread(
-                            self._download_and_encode_base64, result
-                        )
-                        if encode_success:
-                            send_success = await self.send_image(encode_result)
-                            if send_success:
-                                if enable_debug:
-                                    await self.send_text(f"{style_name} 风格转换完成！")
-                                # 安排自动撤回
-                                await self._schedule_auto_recall_for_recent_message(model_config, model_id)
-                                return True, "图生图命令执行成功", True
-                            else:
-                                await self.send_text("图片发送失败")
-                                return False, "图片发送失败", True
-                        else:
-                            await self.send_text(f"图片处理失败：{encode_result}")
-                            return False, f"图片处理失败: {encode_result}", True
-                    except Exception as e:
-                        logger.error(f"{self.log_prefix} 图片下载编码失败: {e!r}")
-                        await self.send_text("图片下载失败")
-                        return False, "图片下载失败", True
+                else:
+                    await self.send_text(f"图片处理失败：{resolved_data}")
+                    return False, f"图片处理失败: {resolved_data}", True
             else:
                 await self.send_text(f"{style_name} 风格转换失败：{result}")
                 return False, f"图生图失败: {result}", True
@@ -250,8 +270,7 @@ class PicGenerationCommand(BaseCommand):
         enable_debug = self.get_config("components.enable_debug_info", False)
 
         # 智能检测：判断是文生图还是图生图
-        image_processor = ImageProcessor(self)
-        input_image_base64 = await image_processor.get_recent_image()
+        input_image_base64 = await self.image_processor.get_recent_image()
         is_img2img_mode = input_image_base64 is not None
 
         if is_img2img_mode:
@@ -292,10 +311,7 @@ class PicGenerationCommand(BaseCommand):
             max_retries = self.get_config("components.max_retries", 2)
 
             # 对于 Gemini/Zai 格式，将原始 LLM 尺寸添加到 model_config 中
-            api_format = model_config.get("format", "openai")
-            if api_format in ("gemini", "zai") and llm_original_size:
-                model_config = dict(model_config)  # 创建副本避免修改原配置
-                model_config["_llm_original_size"] = llm_original_size
+            model_config = inject_llm_original_size(model_config, llm_original_size)
 
             # 调用API客户端生成图片
             api_client = ApiClient(self)
@@ -309,42 +325,30 @@ class PicGenerationCommand(BaseCommand):
             )
 
             if success:
-                # 处理结果
-                if result.startswith(("iVBORw", "/9j/", "UklGR", "R0lGOD")):  # Base64
-                    send_success = await self.send_image(result)
+                # 统一处理 API 响应（dict/str 等）→ 纯字符串
+                final_image_data = self.image_processor.process_api_response(result)
+                if not final_image_data:
+                    await self.send_text("API返回数据格式错误")
+                    return False, "API返回数据格式错误", True
+
+                # 处理结果：统一解析为 base64
+                resolved_ok, resolved_data = await resolve_image_data(
+                    final_image_data, self._download_and_encode_base64, self.log_prefix
+                )
+                if resolved_ok:
+                    send_timestamp = time_module.time()
+                    send_success = await self.send_image(resolved_data)
                     if send_success:
                         if enable_debug:
                             await self.send_text(f"{mode_text}完成！")
-                        # 安排自动撤回
-                        await self._schedule_auto_recall_for_recent_message(model_config, model_id)
+                        await self._schedule_auto_recall_for_recent_message(model_config, model_id, send_timestamp)
                         return True, f"{mode_text}命令执行成功", True
                     else:
                         await self.send_text("图片发送失败")
                         return False, "图片发送失败", True
-                else:  # URL
-                    try:
-                        # 下载并转换为base64
-                        encode_success, encode_result = await asyncio.to_thread(
-                            self._download_and_encode_base64, result
-                        )
-                        if encode_success:
-                            send_success = await self.send_image(encode_result)
-                            if send_success:
-                                if enable_debug:
-                                    await self.send_text(f"{mode_text}完成！")
-                                # 安排自动撤回
-                                await self._schedule_auto_recall_for_recent_message(model_config, model_id)
-                                return True, f"{mode_text}命令执行成功", True
-                            else:
-                                await self.send_text("图片发送失败")
-                                return False, "图片发送失败", True
-                        else:
-                            await self.send_text(f"图片处理失败：{encode_result}")
-                            return False, f"图片处理失败: {encode_result}", True
-                    except Exception as e:
-                        logger.error(f"{self.log_prefix} 图片下载编码失败: {e!r}")
-                        await self.send_text("图片下载失败")
-                        return False, "图片下载失败", True
+                else:
+                    await self.send_text(f"图片处理失败：{resolved_data}")
+                    return False, f"图片处理失败: {resolved_data}", True
             else:
                 await self.send_text(f"{mode_text}失败：{result}")
                 return False, f"{mode_text}失败: {result}", True
@@ -397,40 +401,7 @@ class PicGenerationCommand(BaseCommand):
 
     def _get_model_config(self, model_id: str) -> Optional[Dict[str, Any]]:
         """获取模型配置"""
-        try:
-            model_config = self.get_config(f"models.{model_id}")
-            if model_config and isinstance(model_config, dict):
-                return model_config
-            else:
-                logger.warning(f"{self.log_prefix} 模型 {model_id} 配置不存在或格式错误")
-                return None
-        except Exception as e:
-            logger.error(f"{self.log_prefix} 获取模型配置失败: {e!r}")
-            return None
-
-    def _resolve_style_alias(self, style_name: str) -> str:
-        """解析风格别名，返回实际的风格名"""
-        try:
-            # 首先直接检查是否为有效的风格名
-            if self.get_config(f"styles.{style_name}"):
-                return style_name
-
-            # 不是直接风格名，检查是否为别名
-            style_aliases_config = self.get_config("style_aliases", {})
-            if isinstance(style_aliases_config, dict):
-                for english_name, aliases_str in style_aliases_config.items():
-                    if isinstance(aliases_str, str):
-                        # 支持多个别名，用逗号分隔
-                        aliases = [alias.strip() for alias in aliases_str.split(',')]
-                        if style_name in aliases:
-                            logger.info(f"{self.log_prefix} 风格别名 '{style_name}' 解析为 '{english_name}'")
-                            return english_name
-
-            # 既不是直接风格名也不是别名，返回原名
-            return style_name
-        except Exception as e:
-            logger.error(f"{self.log_prefix} 解析风格别名失败: {e!r}")
-            return style_name
+        return get_model_config(self.get_config, model_id, log_prefix=self.log_prefix)
 
     def _get_style_prompt(self, style_name: str) -> Optional[str]:
         """获取风格提示词"""
@@ -447,174 +418,41 @@ class PicGenerationCommand(BaseCommand):
 
 
     def _download_and_encode_base64(self, image_url: str) -> Tuple[bool, str]:
-        """下载图片并转换为base64编码"""
-        try:
-            import requests
-            import base64
+        """下载图片并转换为base64编码（委托给 ImageProcessor）"""
+        proxy_url = None
+        if self.get_config("proxy.enabled", False):
+            proxy_url = self.get_config("proxy.url", "http://127.0.0.1:7890")
+        return self.image_processor.download_and_encode_base64(image_url, proxy_url=proxy_url)
 
-            # 获取代理配置
-            proxy_enabled = self.get_config("proxy.enabled", False)
-            request_kwargs = {
-                "url": image_url,
-                "timeout": 30
-            }
-
-            if proxy_enabled:
-                proxy_url = self.get_config("proxy.url", "http://127.0.0.1:7890")
-                request_kwargs["proxies"] = {
-                    "http": proxy_url,
-                    "https": proxy_url
-                }
-                logger.info(f"{self.log_prefix} 下载图片使用代理: {proxy_url}")
-
-            response = requests.get(**request_kwargs)
-            if response.status_code == 200:
-                image_base64 = base64.b64encode(response.content).decode('utf-8')
-                return True, image_base64
-            else:
-                return False, f"HTTP {response.status_code}"
-        except Exception as e:
-            return False, str(e)
-
-    async def _schedule_auto_recall_for_recent_message(self, model_config: Dict[str, Any] = None, model_id: str = None):
-        """安排最近发送消息的自动撤回
-
-        Args:
-            model_config: 当前使用的模型配置，用于检查撤回延时设置
-            model_id: 模型ID，用于检查运行时撤回状态
-        """
-        # 检查全局开关
+    async def _schedule_auto_recall_for_recent_message(self, model_config: Dict[str, Any] = None, model_id: str = None, send_timestamp: float = 0.0):
+        """安排最近发送消息的自动撤回"""
         global_enabled = self.get_config("auto_recall.enabled", False)
-        if not global_enabled:
-            return
-
-        # 检查模型的撤回延时，大于0才启用
-        if not model_config:
+        if not global_enabled or not model_config:
             return
 
         delay_seconds = model_config.get("auto_recall_delay", 0)
         if delay_seconds <= 0:
             return
 
-        # 获取 chat_id（Command 通过 message.chat_stream.stream_id 获取）
-        chat_stream = self.message.chat_stream if self.message else None
-        chat_id = chat_stream.stream_id if chat_stream else None
+        chat_id = self._get_chat_id()
         if not chat_id:
             logger.warning(f"{self.log_prefix} 无法获取 chat_id，跳过自动撤回")
             return
 
-        # 检查运行时撤回状态
         if model_id and not runtime_state.is_recall_enabled(chat_id, model_id, global_enabled):
             logger.info(f"{self.log_prefix} 模型 {model_id} 撤回已在当前聊天流禁用")
             return
 
-        # 创建异步任务
-        async def recall_task():
-            try:
-                # 等待足够时间让消息存储和 echo 回调完成（平台返回真实消息ID需要时间）
-                await asyncio.sleep(4)
-
-                # 查询最近发送的消息获取消息ID
-                import time as time_module
-                from src.plugin_system.apis import message_api
-                from src.config.config import global_config
-
-                current_time = time_module.time()
-                # 查询最近10秒内本聊天中Bot发送的消息
-                messages = message_api.get_messages_by_time_in_chat(
-                    chat_id=chat_id,
-                    start_time=current_time - 10,
-                    end_time=current_time + 1,
-                    limit=5,
-                    limit_mode="latest"
-                )
-
-                # 找到Bot发送的图片消息
-                bot_id = str(global_config.bot.qq_account)
-                target_message_id = None
-
-                for msg in messages:
-                    if str(msg.user_info.user_id) == bot_id:
-                        # 找到Bot发送的最新消息
-                        mid = str(msg.message_id)
-                        # 只使用纯数字的消息ID（QQ平台真实ID），跳过 send_api_xxx 格式的内部ID
-                        if mid.isdigit():
-                            target_message_id = mid
-                            break
-                        else:
-                            logger.debug(f"{self.log_prefix} 跳过非平台消息ID: {mid}")
-
-                if not target_message_id:
-                    logger.warning(f"{self.log_prefix} 未找到有效的平台消息ID（需要纯数字格式）")
-                    return
-
-                logger.info(f"{self.log_prefix} 安排消息自动撤回，延时: {delay_seconds}秒，消息ID: {target_message_id}")
-
-                # 等待指定时间后撤回
-                await asyncio.sleep(delay_seconds)
-
-                # 尝试多个撤回命令名（参考 recall_manager_plugin）
-                DELETE_COMMAND_CANDIDATES = ["DELETE_MSG", "delete_msg", "RECALL_MSG", "recall_msg"]
-                recall_success = False
-
-                for cmd in DELETE_COMMAND_CANDIDATES:
-                    try:
-                        result = await self.send_command(
-                            command_name=cmd,
-                            args={"message_id": str(target_message_id)},
-                            storage_message=False
-                        )
-
-                        # 检查返回结果
-                        if isinstance(result, bool) and result:
-                            recall_success = True
-                            logger.info(f"{self.log_prefix} 消息自动撤回成功，命令: {cmd}，消息ID: {target_message_id}")
-                            break
-                        elif isinstance(result, dict):
-                            status = str(result.get("status", "")).lower()
-                            if status in ("ok", "success") or result.get("retcode") == 0 or result.get("code") == 0:
-                                recall_success = True
-                                logger.info(f"{self.log_prefix} 消息自动撤回成功，命令: {cmd}，消息ID: {target_message_id}")
-                                break
-                    except Exception as e:
-                        logger.debug(f"{self.log_prefix} 撤回命令 {cmd} 失败: {e}")
-                        continue
-
-                if not recall_success:
-                    logger.warning(f"{self.log_prefix} 消息自动撤回失败，消息ID: {target_message_id}，已尝试所有命令")
-
-            except asyncio.CancelledError:
-                logger.debug(f"{self.log_prefix} 自动撤回任务被取消")
-            except Exception as e:
-                logger.error(f"{self.log_prefix} 自动撤回失败: {e}")
-
-        # 启动后台任务
-        asyncio.create_task(recall_task())
+        await schedule_auto_recall(chat_id, delay_seconds, self.log_prefix, self.send_command, send_timestamp)
 
 
-class PicConfigCommand(BaseCommand):
+class PicConfigCommand(PicCommandMixin, BaseCommand):
     """图片生成配置管理命令"""
 
     # Command基本信息
     command_name = "pic_config_command"
     command_description = "图片生成配置管理：/dr <操作> [参数]"
     command_pattern = r"(?:.*，说：\s*)?/dr\s+(?P<action>list|models|config|set|reset|on|off|model|recall|default)(?:\s+(?P<params>.*))?$"
-
-    def get_config(self, key: str, default=None):
-        """使用与PicGenerationCommand相同的配置覆盖"""
-        # 检查PicGenerationCommand的配置覆盖
-        if key in PicGenerationCommand._config_overrides:
-            return PicGenerationCommand._config_overrides[key]
-        # 否则使用父类的get_config
-        return super().get_config(key, default)
-
-    def _get_chat_id(self) -> Optional[str]:
-        """获取当前聊天流ID"""
-        try:
-            chat_stream = self.message.chat_stream if self.message else None
-            return chat_stream.stream_id if chat_stream else None
-        except Exception:
-            return None
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行配置管理命令"""
@@ -966,17 +804,8 @@ class PicConfigCommand(BaseCommand):
             await self.send_text(f"设置失败：{str(e)[:100]}")
             return False, f"设置默认模型失败: {str(e)}", True
 
-    def _check_permission(self) -> bool:
-        """检查用户权限"""
-        try:
-            admin_users = self.get_config("components.admin_users", [])
-            user_id = str(self.message.message_info.user_info.user_id) if self.message and self.message.message_info and self.message.message_info.user_info else None
-            return user_id in admin_users
-        except Exception:
-            return False
 
-
-class PicStyleCommand(BaseCommand):
+class PicStyleCommand(PicCommandMixin, BaseCommand):
     """图片风格管理命令"""
 
     # Command基本信息
@@ -1147,36 +976,3 @@ class PicStyleCommand(BaseCommand):
             logger.error(f"{self.log_prefix} 显示帮助失败: {e!r}")
             await self.send_text(f"显示帮助信息失败：{str(e)[:100]}")
             return False, f"显示帮助失败: {str(e)}", True
-
-    def _check_permission(self) -> bool:
-        """检查用户权限"""
-        try:
-            admin_users = self.get_config("components.admin_users", [])
-            user_id = str(self.message.message_info.user_info.user_id) if self.message and self.message.message_info and self.message.message_info.user_info else None
-            return user_id in admin_users
-        except Exception:
-            return False
-
-    def _resolve_style_alias(self, style_name: str) -> str:
-        """解析风格别名，返回实际的风格名"""
-        try:
-            # 首先直接检查是否为有效的风格名
-            if self.get_config(f"styles.{style_name}"):
-                return style_name
-
-            # 不是直接风格名，检查是否为别名
-            style_aliases_config = self.get_config("style_aliases", {})
-            if isinstance(style_aliases_config, dict):
-                for english_name, aliases_str in style_aliases_config.items():
-                    if isinstance(aliases_str, str):
-                        # 支持多个别名，用逗号分隔
-                        aliases = [alias.strip() for alias in aliases_str.split(',')]
-                        if style_name in aliases:
-                            logger.info(f"{self.log_prefix} 风格别名 '{style_name}' 解析为 '{english_name}'")
-                            return english_name
-
-            # 既不是直接风格名也不是别名，返回原名
-            return style_name
-        except Exception as e:
-            logger.error(f"{self.log_prefix} 解析风格别名失败: {e!r}")
-            return style_name

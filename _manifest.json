@@ -1,19 +1,19 @@
 {
   "manifest_version": 1,
-  "name": "自定义智能多模型图片生成插件（custom_pic_plugin）",
-  "version": "3.3.3",
-  "description": "智能多模型图片生成插件，支持文生图和图生图自动识别。兼容OpenAI、豆包、Gemini、魔搭等多种API格式。提供命令式风格转换、模型配置管理、结果缓存等功能。支持动态模型切换、风格别名、调试开关等高级特性。",
+  "name": "麦麦绘卷（Claude MAInet）",
+  "version": "3.4.0",
+  "description": "智能多模型图片生成插件，支持文生图和图生图自动识别。兼容OpenAI、OpenAI-Chat、豆包、Gemini、魔搭等多种API格式。提供命令式风格转换、模型配置管理、结果缓存、自拍负面提示词、独立生图接口等功能。支持动态模型切换、风格别名、调试开关等高级特性。",
   "author": {
     "name": "Ptrel，Rabbit-Jia-Er，saberlights Kiuon",
-    "url": "https://github.com/1021143806/custom_pic_plugin"
+    "url": "https://github.com/1021143806/mais-art-journal"
   },
   "license": "GPL-v3.0-or-later",
-  
+
   "host_application": {
     "min_version": "0.10.0"
   },
-  "homepage_url": "https://github.com/1021143806/custom_pic_plugin",
-  "repository_url": "https://github.com/1021143806/custom_pic_plugin",
+  "homepage_url": "https://github.com/1021143806/mais-art-journal",
+  "repository_url": "https://github.com/1021143806/mais-art-journal",
   "keywords": [
     "draw",
     "Expression",
@@ -26,7 +26,7 @@
   ],
   "default_locale": "zh-CN",
   "locales_path": "_locales",
-  
+
   "plugin_info": {
     "is_built_in": false,
     "plugin_type": "image_generator",
@@ -70,14 +70,16 @@
     ],
     "features": [
       "智能文生图/图生图识别",
-      "多API格式支持(OpenAI/豆包/Gemini/魔搭)",
+      "多API格式支持(OpenAI/OpenAI-Chat/豆包/Gemini/魔搭)",
       "命令式风格转换",
       "动态模型配置管理",
       "风格别名系统",
       "结果缓存机制",
       "调试开关控制",
-      "支持图生图开关"
+      "支持图生图开关",
+      "自拍负面提示词",
+      "独立生图接口(generate_image_standalone)"
     ]
   },
-  "id": "Ptrel，Rabbit-Jia-Er.custom_pic_plugin"
+  "id": "Ptrel，Rabbit-Jia-Er.mais_art_journal"
 }

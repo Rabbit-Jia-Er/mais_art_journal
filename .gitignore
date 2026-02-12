@@ -2,12 +2,15 @@
 *.log
 
 # 忽略特定目录
-old/
+old/*
 __pycache__/
 .claude
+test/*
 
 # 忽略特定文件
 config.toml
+图像到图像（简易）.json
+文生图（效果最好的一个）.json
 .env
 nul
 

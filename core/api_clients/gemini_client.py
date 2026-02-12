@@ -4,7 +4,7 @@ import requests
 from typing import Dict, Any, Tuple, Optional
 
 from .base_client import BaseApiClient, logger
-from ..size_utils import pixel_size_to_gemini_aspect
+from ..utils import pixel_size_to_gemini_aspect
 
 
 class GeminiClient(BaseApiClient):

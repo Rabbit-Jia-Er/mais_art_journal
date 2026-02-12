@@ -1,78 +1,86 @@
-# Custom Pic Plugin - 智能多模型图片生成插件
+# 麦麦绘卷 (Claude MAInet) - 智能多模型图片生成插件
 
-基于 Maibot 插件的智能多模型图片生成插件，支持文生图和图生图自动识别。兼容OpenAI、豆包、Gemini、魔搭等多种API格式。提供命令式风格转换、模型配置管理、结果缓存等功能。（参考 doubao_pic_plugin 进行二次开发）
+基于 Maibot 插件的智能多模型图片生成插件，支持文生图和图生图自动识别。兼容OpenAI、豆包、Gemini、魔搭等多种API格式。提供命令式风格转换、自拍模式、自动自拍发说说、模型配置管理、结果缓存等功能。
 
-魔搭 api 的优点是调用免费，AI 绘图本身配置需求并不是很高，但是平台收费又都比较贵，魔搭社区有按天计算的免费调用限额，对应麦麦的绘图需求来说完全足够。如果想接其他风格绘图的可以使用豆包和 GPT 模型。
-
-## ✨ 主要特性（本插件为 MaiBot 生态下的图片生成扩展）
+## ✨ 主要特性
 
 ### 🎯 智能图片生成
-   - **自动模式识别**：智能判断文生图或图生图模式
-   - **LLM智能判定**：在Focus模式下使用LLM精确理解用户需求
-   - **关键词触发**：在Normal模式下通过关键词快速响应
-   - **自拍模式**：支持生成Bot角色的自拍照片，包含40+种智能手部动作库
+- **文生图**: 根据对话内容自动生成图片
+- **图生图**: 检测到消息中有图片时自动使用图生图模式
+- **自拍模式**: 根据手部动作库生成自拍提示词，可配置参考图
+- **提示词优化**: 自动将中文描述优化为专业英文 SD 提示词（自拍模式仅优化场景，不干扰角色外观）
+- **结果缓存**: 相同参数复用之前的结果
+- **自动撤回**: 可按模型配置延时撤回
 
-### 🛠️ 多API格式支持
-   - **OpenAI格式**：兼容OpenAI、硅基流动、Grok、NewAPI等
-   - **豆包格式**：火山引擎豆包专用格式
-   - **Gemini格式**：Google Gemini专用格式，支持宽高比和分辨率配置
-   - **魔搭格式**：魔搭社区专用格式
-   - **砂糖云格式**：NovelAI代理，支持artist标签
-   - **梦羽AI格式**：支持多种模型索引
-   - **Zai格式**：Gemini API转发服务
+### 🎨/dr 命令系统
 
-### 🎨 命令式功能
-   - **风格转换**：`/dr <风格>` - 快速应用预设风格（仅图生图）
-   - **自然语言**：`/dr 画一只猫` - 智能判断文/图生图
-   - **模型指定**：`/dr 用model1画猫` - 自然语言中动态指定模型
-   - **模型管理**：`/dr list`、`/dr set <模型ID>` - 动态切换模型
-   - **风格管理**：`/dr styles`、`/dr style <风格名>` - 查看风格详情
+#### 图片生成
 
-### ⚙️ 高级功能
-   - **提示词优化器**：自动将中文描述优化为专业英文提示词
-   - **动态配置**：运行时切换模型，无需重启
-   - **聊天流独立配置**：每个聊天流可独立开关插件/模型/撤回
-   - **自动撤回**：支持按模型配置图片自动撤回延时
-   - **风格别名**：支持中文别名，如"卡通"对应"cartoon"
-   - **结果缓存**：相同参数自动复用结果
-   - **调试开关**：可控制提示信息显示
-   - **图生图开关**：模型级别的图生图支持控制
+| 命令 | 说明 |
+|------|------|
+| `/dr <风格名>` | 对最近的图片应用预设风格（图生图） |
+| `/dr <描述>` | 自然语言生成图片（自动判断文/图生图） |
+| `/dr 用model2画一只猫` | 指定模型生成 |
 
-## 📋 组件说明
+#### 风格管理
 
-### Action组件 - 智能图片生成
-   - **激活方式**：Focus模式使用LLM判定，Normal模式使用关键词
-   - **支持场景**：
-        - 文生图：用户描述要画的内容
-        - 图生图：回复图片并要求修改
-   - **关键词**：`画`、`绘制`、`生成图片`、`图生图`、`修改图片`等
+| 命令 | 说明 |
+|------|------|
+| `/dr styles` | 列出所有可用风格 |
+| `/dr style <名>` | 查看风格详情 |
+| `/dr help` | 帮助信息 |
 
-### Command组件 - 命令式操作
-1. **风格化图生图** (`/dr <风格>`)
-   - 直接使用预配置的英文提示词
-   - 支持风格别名（中文）
-   - 需要先发送图片
+#### 配置管理（需管理员权限）
 
-2. **模型配置管理**
-   - `/dr list` - 查看所有可用模型
-   - `/dr set <模型ID>` - 动态切换图生图命令使用的模型
-   - `/dr config` - 查看当前配置
-   - `/dr reset` - 重置为默认配置
+| 命令 | 说明 |
+|------|------|
+| `/dr list` | 列出所有模型 |
+| `/dr config` | 显示当前聊天流配置 |
+| `/dr set <模型ID>` | 设置 /dr 命令使用的模型 |
+| `/dr default <模型ID>` | 设置 Action 组件默认模型 |
+| `/dr model on\|off <模型ID>` | 开关指定模型 |
+| `/dr recall on\|off <模型ID>` | 开关指定模型的撤回 |
+| `/dr on` / `/dr off` | 开关插件（当前聊天流） |
+| `/dr reset` | 重置当前聊天流的所有运行时配置 |
 
-3. **管理员命令**（需在admin_users中配置）
-   - `/dr on` / `/dr off` - 启用/禁用当前聊天的插件
-   - `/dr model on|off <模型ID>` - 启用/禁用指定模型
-   - `/dr recall on|off <模型ID>` - 启用/禁用指定模型的自动撤回
-   - `/dr default <模型ID>` - 设置Action组件默认模型
+> 运行时配置（模型切换、开关等）仅保存在内存中，重启后恢复为 config.toml 的全局设置。
 
-4. **风格管理**
-   - `/dr styles` - 列出所有可用风格
-   - `/dr style <风格名>` - 查看风格详情
-   - `/dr help` - 显示帮助信息
+### 自动自拍
+
+定时生成自拍图片并发布到 QQ 空间说说。
+
+**依赖**:
+- `autonomous_planning` 插件 — 提供日程数据（当前活动）
+- `Maizone` 插件 — 发布到 QQ 空间
+
+**特性**:
+- 可配置间隔（默认 2 小时）
+- 安静时段控制（默认 00:00-07:00 不发）
+- 12 种活动类型的场景/动作/表情/光线随机组合
+- 配文基于日程活动 + MaiBot 人设 + 表达风格自然生成，生成失败则跳过不发
+- 无日程数据时自动跳过，不会发空内容
+
+---
+
+## 支持的 API 格式
+
+| format | 平台 | 说明 |
+|--------|------|------|
+| `openai` | OpenAI / 硅基流动 / Grok / NewAPI 等 | 通用 `/images/generations` 接口，自动适配硅基流动参数差异 |
+| `openai-chat` | 支持生图的 Chat 模型 | 通过 `/chat/completions` 生图，多策略提取图片 |
+| `doubao` | 豆包（火山引擎） | 使用 Ark SDK，支持 seed/guidance_scale/watermark |
+| `gemini` | Google Gemini | 原生 `generateContent` 接口，支持 Gemini 2.5/3 系列 |
+| `modelscope` | 魔搭社区 | 异步任务模式，自动轮询结果 |
+| `shatangyun` | 砂糖云 (NovelAI) | GET 请求，URL 参数传递 |
+| `mengyuai` | 梦羽 AI | 支持多模型切换，不支持图生图（须设 `support_img2img = false`） |
+| `zai` | Zai (Gemini 转发) | OpenAI 兼容的 chat/completions，支持宽高比/分辨率 |
+| `comfyui` | 本地 ComfyUI | 加载工作流 JSON，替换占位符，轮询结果（支持代理配置） |
+
+---
 
 ## 🚀 快速开始
 
-### 1. 安装插件
+## 安装插件
   - 使用命令行工具或是 git base 进入你的麦麦目录
 
    ```shell
@@ -82,33 +90,181 @@
   - 克隆本仓库
 
    ```shell
-   git clone https://github.com/1021143806/custom_pic_plugin
+   git clone https://github.com/Rabbit-Jia-Er/mais-art-journal.git mais_art_journal
    ```
-   
-  - 重启 maibot 后你会看到在当前插件文件夹 `MaiBot/plugins/custom_pic_plugin`中生成了一个配置文件 `config.toml`
+
+  - 重启 maibot 后你会看到在当前插件文件夹 `MaiBot/plugins/mais_art_journal`中生成了一个配置文件 `config.toml`
   - 按照配置文件中的说明填写必要参数后重启 MaiBot 即可让你的麦麦学会不同画风的画画（如何申请 key 请自行前往对应平台官网查看 api 文档）
 
-### 2. 配置说明
-  - 编辑 `config.toml`，配置至少一个模型：
+## 配置说明
+
+配置文件: `config.toml`，首次启动自动生成。版本更新时自动备份到 `old/` 目录。
+
+### 基础设置
 
 ```toml
 [plugin]
-enabled = true  # 是否启用插件
+enabled = true                    # 启用插件
 
-[models.model1]
-name = "我的生图模型"  # 自定义名称（用于切换模型）
-base_url = "https://api.openai.com/v1"  # 根据服务商选择填写ULR
-api_key = "Bearer your_api_key_here"  # 填写你的 API 密钥（不同平台添加 key 时需要注意是否需要前缀 ‘Bearer ’。）
-format = "openai"  # openai/doubao/gemini/modelscope/shatangyun/mengyuai/zai（填写API格式，根据平台选择）
-model = "dall-e-3"  # 填写你要使用的模型
-support_img2img = true  # 是否开启图生图（未启用自动转为文生图）
+[generation]
+default_model = "model1"          # Action 组件默认使用的模型 ID
+
+[components]
+enable_unified_generation = true  # 启用智能生图 Action
+enable_pic_command = true         # 启用 /dr 图片生成命令
+enable_pic_config = true          # 启用 /dr 配置管理命令
+enable_pic_style = true           # 启用 /dr 风格管理命令
+pic_command_model = "model1"      # /dr 命令默认模型（可通过 /dr set 动态切换）
+admin_users = ["12345"]           # 管理员 QQ 号列表（字符串格式）
+max_retries = 2                   # API 失败重试次数
+enable_debug_info = false         # 显示调试信息
+enable_verbose_debug = false      # 打印完整请求/响应报文
 ```
 
-### 3. 自定义参数
-  - 可在 [generation] 节自定义默认模型、尺寸、指导强度、自定义提示词等参数。
-        - 尺寸，可以选择让 ai 自己判断或是指定尺寸，例如 gpt-image-1 模型不支持生成 512x512 的尺寸，那么我们可以固定只生成 1024x1024 ，需要自行检查兼容性。
-  - 自定义提示词建议学习相关 AI 绘图知识，提示词对模型生图影响极大，大部分生图模型与豆包模糊提示词生图不同，但是使用标准的单词与逗号组合是全模型通用的。
-  - 在 models 类中配置不同的模型，model1，model2 等，可以配置不同的 api 供应商及模型。可通过配置文件中的 default_model 快速切换默认调用模型，如果没有配置，则默认为配置文件第一个模型。
+### 模型配置
+
+```toml
+[models.model1]
+name = "我的模型"                          # 显示名称
+base_url = "https://api.siliconflow.cn/v1" # API 地址
+api_key = "Bearer sk-xxx"                  # API 密钥（统一 Bearer 格式）
+format = "openai"                          # API 格式
+model = "Kwai-Kolors/Kolors"               # 模型标识
+fixed_size_enabled = false                 # 固定尺寸（关闭=LLM 自动选）
+default_size = "1024x1024"                 # 默认尺寸
+seed = 42                                  # 随机种子（-1=随机）
+guidance_scale = 2.5                       # 引导强度
+num_inference_steps = 20                   # 推理步数
+custom_prompt_add = ", best quality"       # 追加正面提示词
+negative_prompt_add = "lowres, bad anatomy" # 追加负面提示词
+support_img2img = true                     # 是否支持图生图（请自行判断）
+auto_recall_delay = 0                      # 自动撤回延时（秒），0=不撤回
+```
+
+添加更多模型：复制 `[models.model1]` 整节，改名为 `model2`、`model3` 等。
+
+### ComfyUI 支持
+
+通过本地或远程 ComfyUI 实例的 HTTP API 生成图片。需先在 ComfyUI Web UI 中点击 **"保存(API格式)"** 导出工作流 JSON，放到插件 `workflow/` 目录下。
+
+**基本配置：**
+```toml
+[models.model6]
+name = "ComfyUI-本地"
+base_url = "http://127.0.0.1:8188"  # ComfyUI 服务地址
+api_key = ""                         # 不需要，留空
+format = "comfyui"                   # 必须填 comfyui
+model = "my_workflow.json"           # 工作流文件名（相对 workflow/ 目录，也可填绝对路径）
+fixed_size_enabled = true            # 建议开启，尺寸通过占位符传入工作流
+default_size = "1024x1024"           # 通过 ${width}/${height} 传入工作流
+seed = -1                            # -1=每次随机，通过 ${seed} 传入
+guidance_scale = 8                   # 通过 ${cfg} 传入
+num_inference_steps = 30             # 通过 ${steps} 传入
+custom_prompt_add = ", masterpiece"  # 拼接到用户提示词末尾，一起通过 ${prompt} 传入
+negative_prompt_add = "lowres"       # 通过 ${negative_prompt} 传入
+support_img2img = false              # 需工作流中包含 ${image} 占位符
+```
+
+**工作流占位符：**
+
+在导出的 API 格式 JSON 中，将需要动态控制的字段值替换为占位符（带引号）：
+
+| 占位符 | 来源 | 工作流中的典型位置 |
+|--------|------|---------------------|
+| `"${prompt}"` | 用户提示词 + `custom_prompt_add` | CLIPTextEncode 节点的 `text` |
+| `"${seed}"` | `seed` 配置值 | KSampler 节点的 `seed` |
+| `"${negative_prompt}"` | `negative_prompt_add` | 负面 CLIPTextEncode 节点的 `text` |
+| `"${steps}"` | `num_inference_steps` | KSampler 节点的 `steps` |
+| `"${cfg}"` | `guidance_scale` | KSampler 节点的 `cfg` |
+| `"${width}"` | 从 `default_size` 解析 | EmptyLatentImage 节点的 `width` |
+| `"${height}"` | 从 `default_size` 解析 | EmptyLatentImage 节点的 `height` |
+| `"${denoise}"` | 图生图降噪强度 | KSampler 节点的 `denoise` |
+| `"${image}"` | 用户发送的图片（自动上传） | LoadImage 节点的 `image` |
+
+**示例** — 工作流 JSON 片段：
+```json
+{
+  "3": {
+    "inputs": {
+      "seed": "${seed}",
+      "steps": "${steps}",
+      "cfg": "${cfg}",
+      "sampler_name": "dpmpp_2m",
+      "denoise": "${denoise}",
+      "model": ["4", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["5", 0]
+    },
+    "class_type": "KSampler"
+  },
+  "5": {
+    "inputs": {
+      "width": "${width}",
+      "height": "${height}",
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage"
+  },
+  "6": {
+    "inputs": {
+      "text": "${prompt}",
+      "clip": ["4", 1]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "7": {
+    "inputs": {
+      "text": "${negative_prompt}",
+      "clip": ["4", 1]
+    },
+    "class_type": "CLIPTextEncode"
+  }
+}
+```
+
+> 不使用的占位符可以不写，对应字段会保持工作流中的原始值，完全向后兼容。
+
+### 功能配置
+
+```toml
+[selfie]
+enabled = true
+reference_image_path = ""         # 参考图路径（留空=纯文生图）
+prompt_prefix = "blue hair, red eyes, 1girl"  # Bot 外观描述
+negative_prompt = ""              # 额外负面提示词（自动附加 anti-dual-hands）
+
+[auto_recall]
+enabled = false                   # 总开关，需在模型配置中设置 auto_recall_delay > 0
+
+[prompt_optimizer]
+enabled = true                    # 使用 MaiBot LLM 优化提示词
+```
+
+### 自动自拍配置
+
+```toml
+[auto_selfie]
+enabled = false
+interval_minutes = 120            # 自拍间隔（分钟）
+selfie_model = "model1"           # 使用的模型 ID
+selfie_style = "standard"         # standard=前置自拍 / mirror=对镜自拍
+quiet_hours_start = "00:00"       # 安静时段（此时段内不发自拍）
+quiet_hours_end = "07:00"
+caption_enabled = true            # 是否生成配文
+```
+
+### 风格配置
+
+```toml
+[styles]
+cartoon = "cartoon style, anime style, colorful, vibrant colors, clean lines"
+watercolor = "watercolor painting style, soft colors, artistic"
+
+[style_aliases]
+cartoon = "卡通,动漫"
+watercolor = "水彩"
+```
 
 ## 💡 使用示例
 
@@ -116,19 +272,16 @@ support_img2img = true  # 是否开启图生图（未启用自动转为文生图
 ```
 用户：麦麦，画一张美少女
 麦麦：[生成图片]
+
+用户：[发送图片]
+用户：[回复 麦麦： [图片] ]，说：麦麦，把这张图的背景换成海滩
+麦麦：[图生图：基于输入图片生成]
 ```
 
-### 自拍模式（Action组件）
+### 自拍模式
 ```
 用户：麦麦，来张自拍！
 麦麦：[生成Bot角色的自拍照片，包含随机手部动作]
-```
-
-### 图生图
-```
-用户：[发送图片]
-用户：[回复 麦麦： [图片] ]，说：麦麦，把这张图的背景换成海滩
-麦麦：[生成修改后的图片]
 ```
 
 ### 命令式风格转换（仅图生图）
@@ -138,72 +291,31 @@ support_img2img = true  # 是否开启图生图（未启用自动转为文生图
 麦麦：[应用卡通风格]
 ```
 
-### 命令式自然语言生成（智能文/图生图）
+### 命令式自然语言生成（文/图生图）
 ```
 用户：/dr 画一只可爱的猫
 麦麦：[文生图：生成新图片]
 
 用户：[发送图片]
-用户：[回复 麦麦： [图片] ]，说：/dr 用model1画一只猫
+用户：[回复 麦麦： [图片] ]，说：麦麦，把这张图的背景换成海滩
 麦麦：[图生图：基于输入图片生成]
 ```
-
-### 动态切换模型
-```
-用户：/dr list
-麦麦：📋 可用模型列表：
-• model1 ✅[默认] 🔧[命令] 🖼️[图生图]
-• model2 📝[仅文生图]
-
-用户：/dr set model2
-麦麦：✅ 图生图命令模型已成功切换！
-```
-
-## ⚙️ 配置说明
-
-### 基础配置
-- `plugin.enabled` - 是否启用插件
-- `generation.default_model` - Action组件使用的默认模型
-- `components.pic_command_model` - Command组件使用的模型
-
-### 高级配置
-- `components.enable_debug_info` - 调试信息开关
-- `components.admin_users` - 管理员用户ID列表
-- `cache.enabled` - 结果缓存开关
-- `cache.max_size` - 最大缓存数量
-- `prompt_optimizer.enabled` - 提示词优化器开关
-- `auto_recall.enabled` - 自动撤回总开关
-
-### 风格配置
-```toml
-[styles]
-cartoon = "cartoon style, anime style, colorful, vibrant colors"
-oil_painting = "oil painting style, classic art, brush strokes"
-
-[style_aliases]
-cartoon = "卡通,动漫"
-oil_painting = "油画,古典"
-```
-
-### 模型配置
-每个模型支持独立配置：
-- `support_img2img` - 是否支持图生图
-- `fixed_size_enabled` - 是否固定图片尺寸
-- `guidance_scale` - 指导强度
-- `num_inference_steps` - 推理步数
-- `custom_prompt_add` - 正面提示词增强
-- `negative_prompt_add` - 负面提示词
 
 ## 🔧 依赖说明
 
 - 需 Python 3.12+
-- 依赖 MaiBot 插件系统（0.8.0 新插件系统，测试兼容 0.10.0 - 0.10.2）
+- 依赖 MaiBot 项目插件系统，目前改为一直支持最新版
+- MaiBot 项目地址：https://github.com/Mai-with-u/MaiBot
 - 火山方舟 api 需要通过 pip install 'volcengine-python-sdk[ark]' 安装方舟SDK
+
+## ⚠️ 注意事项
+
+- 模型是否支持图生图请参考各平台官方文档（注：在`support_img2img = true` - 是否支持图生图中填写true/false，请自行判断）
+- 请妥善保管 API 密钥，不要在公开场合泄露，各平台 API 可能有调用频率限制，请注意控制使用频率，生成的图片内容受模型和提示词影响，请遵守相关平台的使用规范（注：梦羽AI和砂糖云支持NSFW，请自行判断）
 
 ## 常见问题
 
-- **API 密钥未配置/错误**：请检查 `config.toml` 中 `[api] volcano_generate_api_key`。
-- **图片描述为空**：需提供明确的图片描述。
+- **API 密钥未配置/错误**：请检查 `config.toml` 中对应模型的 api_key 配置。
 - **图片尺寸无效**：支持如 `1024x1024`，宽高范围 100~10000。
 - **依赖缺失**：请确保 MaiBot 插件系统相关依赖已安装。
 - **api 调用报错**
@@ -213,75 +325,14 @@ oil_painting = "油画,古典"
 429：触发了 rate limits；参考报错信息（message）判断触发的是 RPM /RPD / TPM / TPD / IPM / IPD 中的具体哪一种，可以参考 Rate Limits 了解具体的限流策略
 504 / 503：一般是服务系统负载比较高，可以稍后尝试；
 
-## 魔搭链接及教程
-
-==具体流程步骤如下：==
-
-1. 注册一个魔搭账号。
-2. 然后你需要根据魔搭[官网阿里云绑定教程](https://modelscope.cn/docs/accounts/aliyun-binding-and-authorization)完成阿里云认证。
-3. 接着到你的魔搭主页申请一个 API key，参考[API推理介绍](https://modelscope.cn/docs/model-service/API-Inference/intro)。
-4. 现在你已经拥有了一个 key 可以直接去[模型库](https://modelscope.cn/models)挑选你想要使用的生图模型了，在每个模型的详细里都会有一段教程告诉你怎么使用，我们只需要取可以使用 API 推理的模型的模型名称就好了。
-5. 在该插件的配置文件中填入你获取的 key ，选择魔搭对应的请求地址，然后填入对应的模型名称即可。剩下的相关配置根据配置文件中的注释填入。
-
-## ⚠️ 注意事项
-
-- 请妥善保管 API 密钥，不要在公开场合泄露，各平台 API 可能有调用频率限制，请注意控制使用频率，生成的图片内容受模型和提示词影响，请遵守相关平台的使用规范
-- 模型是否支持图生图请参考各平台官方文档（注：在`support_img2img = true` - 是否支持图生图中填写true/false，请自行判断）
-- Action组件、魔搭、Grok、梦羽AI和砂糖云不支持图生图功能（注：梦羽AI和砂糖云支持NSFW，请自行判断）
-
 ## 贡献和反馈
 
-欢迎提交 Issue 和 Pull Request！
+- 制作者水平有限，任何漏洞、疑问或建议,欢迎提交 Issue 和 Pull Request！
+- 或联系QQ：1021143806,3082618311。
 
 ---
 
-## 未来计划
-
-考虑兼容 ComfyUI 实现自定义生图。
-
-## 📝 更新日志
-
-### v3.3.3
-- 🗑️ **移除基础中文转英文功能**：不再使用简单的词汇映射进行中文到英文的转换，完全依赖提示词优化器（LLM）进行高质量的提示词优化，提升生成效果。
-- 🔧 **优化OpenAI客户端响应处理**：增强base64图片数据清理，提升日志可读性。
-- 📝 **日志增强**：在关键步骤中显示使用的提示词，便于调试。
-
-### v3.3.1
-- 🆕 **新增 API 格式**：支持砂糖云(NovelAI)、梦羽AI、Zai(Gemini转发)
-- 🧠 **提示词优化器**：自动将中文描述优化为专业英文提示词
-- 🔄 **自动撤回**：支持按模型配置图片自动撤回延时
-- 🎛️ **聊天流独立配置**：每个聊天流可独立开关插件/模型/撤回
-- 🛠️ **管理员命令**：新增 `/dr on|off`、`/dr model`、`/dr recall`、`/dr default`
-
-### v3.2.0
-- 🎯 **新增自拍模式**：支持生成Bot角色的自拍照片，包含40+种智能手部动作库
-- 🎨 **自然语言命令**：`/dr 画一只猫` 智能判断文/图生图
-- 🔧 **模型指定**：支持 `/dr 用model1画猫` 动态指定模型
-- 🖼️ **Gemini 尺寸配置**：支持宽高比和分辨率配置（16:9、16:9-2K等）
-- ✨ **智能降级**：模型不支持图生图时自动转为文生图
-- 📋 **风格判断优化**：单个词但风格不存在时提示错误
-
-### v3.1.2
-- 🎯 智能文生图/图生图自动识别
-- 🛠️ 新增命令式配置管理功能
-- 🎨 风格别名系统
-- ⚡ 动态模型切换
-- 🐛 修复失败缓存共享问题
-- 🔧 优化API路径处理
-- 📋 简化显示信息
-
-### v3.1.1
-- 支持多模型配置
-- 新增缓存机制
-- 兼容多种API格式
-
-## 🤝 基于 MaiBot 项目
-- 支持 0.8.x - 0.10.x
-  - 0.9.x 升级仅配置文件新增两个字段，所以不影响 0.8 版本使用，
-  - 0.10 修改支持版本号可直接加载成功
-  - 目前改为一直支持最新版
-
-插件开发历程
+## 🤝 插件开发历程
 
 - 该插件基于 MaiBot 最早期官方豆包生图示例插件修改而来，最早我是为了兼容 GPT 生图进行修改，添加对 GPT 生图模型直接返回 base64 格式图片的兼容判断，因为 GPT 生图太贵了，所以后续想兼容魔搭社区的免费生图，新增一层报文兼容。（我不是计算机专业，大部分代码来自 DeepSeek R1 研究了很久，不得不说确实很好玩。）
 - 目前支持三种报文返回，即三个平台的图片返回报文 url，image，base64，如果其他平台返回的报文符合以上三种格式也可以正常使用，可以自行尝试。
@@ -291,6 +342,6 @@ oil_painting = "油画,古典"
 
 ## 🔗 版权信息
 
-- 作者：MaiBot 团队
+- 作者：Ptrel, Rabbit-Jia-Er, saberlights Kiuon
 - 许可证：GPL-v3.0-or-later
-- 项目主页：https://github.com/MaiM-with-u/maibot
+- 项目主页：https://github.com/Rabbit-Jia-Er/mais-art-journal
